@@ -144,6 +144,7 @@ class LogSegment private[log] (val log: FileRecords,
    * 把给定的消息添加到给定的位移后，如有需要则添加一个条目到索引中。
    * 假定本方法在锁中被调用。
    *
+   * 写入消息到日志段。
    * 基本流程如下：
    * 1. 日志段是否为空？是则更新用于日志段切分的时间戳。
    * 2. 确保消息位移值合法。
@@ -316,9 +317,9 @@ class LogSegment private[log] (val log: FileRecords,
   /**
    * Read a message set from this segment beginning with the first offset >= startOffset. The message set will include
    * no more than maxSize bytes and will end before maxOffset if a maxOffset is specified.
-   *
    * 从日志段的第一个偏移量读取消息集。这个消息集的大小不超过最大值的，且偏移量不超过最大偏移量。
    *
+   * 读取日志段，获取消息。
    * 基本流程如下：
    * 1. 查找索引确定读取物理文件的位置。
    * 2. 计算需要读取的字节数。
@@ -376,6 +377,19 @@ class LogSegment private[log] (val log: FileRecords,
   /**
    * Run recovery on the given segment. This will rebuild the index from the log file and lop off any invalid bytes
    * from the end of the log and index.
+   * 在给定的日志段上执行 recovery 方法，将会从日志文件中重建索引并丢弃日志和索引的末尾中所有无效的字节。
+   *
+   * 读取日志段文件，重建索引。
+   * Broker 在启动时会从磁盘上加载所有日志段信息到内存，并创建相应的 LogSegment 对象实例。
+   * 此时执行基本流程如下：
+   * 1. 清空索引文件。
+   * 2. 遍历日志段中所有消息集合：
+   *      2.1 校验消息集合。
+   *      2.2 保存最大时间戳和所属消息位移。
+   *      2.3 更新索引项。
+   *      2.4 更新总消息字节数。
+   *      2.5 更新事务 Producer 状态和 Lead Epoch 缓存。
+   * 3. 执行消息日志索引文件截断。
    *
    * @param producerStateManager Producer state corresponding to the segment's base offset. This is needed to recover
    *                             the transaction index.
@@ -385,36 +399,45 @@ class LogSegment private[log] (val log: FileRecords,
    */
   @nonthreadsafe
   def recover(producerStateManager: ProducerStateManager, leaderEpochCache: Option[LeaderEpochFileCache] = None): Int = {
+    // 调用 reset 方法清空所有索引文件。
     offsetIndex.reset()
     timeIndex.reset()
     txnIndex.reset()
     var validBytes = 0
     var lastIndexEntry = 0
     maxTimestampSoFar = RecordBatch.NO_TIMESTAMP
+
     try {
+      // 遍历日志段中的所有消息集合或消息批次（Record Batch），对于读取到的每个消息集合，日志段必须确保它们是合法的。
       for (batch <- log.batches.asScala) {
+        // 该集合中的消息必须符合 Kafka 定义的二进制格式。
         batch.ensureValid()
+
+        // 该集合中最后一条消息的位移不能越界，即它与日志段起始位移的差值必须是正整数。
         ensureOffsetInRange(batch.lastOffset)
 
+        // 更新遍历过程中观测到的最大时间戳以及所属消息的位移值，用于后续构建索引项。
         // The max timestamp is exposed at the batch level, so no need to iterate the records
         if (batch.maxTimestamp > maxTimestampSoFar) {
           maxTimestampSoFar = batch.maxTimestamp
           offsetOfMaxTimestampSoFar = batch.lastOffset
         }
-
         // Build offset index
         if (validBytes - lastIndexEntry > indexIntervalBytes) {
           offsetIndex.append(batch.lastOffset, validBytes)
           timeIndex.maybeAppend(maxTimestampSoFar, offsetOfMaxTimestampSoFar)
           lastIndexEntry = validBytes
         }
-        validBytes += batch.sizeInBytes()
 
+        // 不断累加当前已读取的消息字节数，并根据该值有条件地写入索引项。
+        validBytes += batch.sizeInBytes()
         if (batch.magic >= RecordBatch.MAGIC_VALUE_V2) {
           leaderEpochCache.foreach { cache =>
             if (batch.partitionLeaderEpoch > 0 && cache.latestEpoch.forall(batch.partitionLeaderEpoch > _))
               cache.assign(batch.partitionLeaderEpoch, batch.baseOffset)
           }
+
+          // 更新事务型 Producer 的状态以及 Leader Epoch 缓存。
           updateProducerState(producerStateManager, batch)
         }
       }
@@ -423,13 +446,20 @@ class LogSegment private[log] (val log: FileRecords,
         warn("Found invalid messages in log segment %s at byte offset %d: %s. %s"
           .format(log.file.getAbsolutePath, validBytes, e.getMessage, e.getCause))
     }
+
+    // 将日志段当前总字节数和刚刚累加的已读取字节数进行比较。
     val truncated = log.sizeInBytes - validBytes
+
+    // 如果发现前者比后者大，说明日志段写入了一些非法消息，需要执行截断操作，将日志段大小调整回合法的数值。
     if (truncated > 0)
       debug(s"Truncated $truncated invalid bytes at the end of segment ${log.file.getAbsoluteFile} during recovery")
-
     log.truncateTo(validBytes)
+
+    // 相应地调整索引文件的大小。
     offsetIndex.trimToValidSize()
+
     // A normally closed segment always appends the biggest timestamp ever seen into log segment, we do this as well.
+    // 一个正常关闭的日志段总是添加此前见过最大的时间戳添加到日志段中。
     timeIndex.maybeAppend(maxTimestampSoFar, offsetOfMaxTimestampSoFar, skipFullCheck = true)
     timeIndex.trimToValidSize()
     truncated
