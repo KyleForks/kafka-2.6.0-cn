@@ -1,5 +1,9 @@
 Apache Kafka
 =================
+> [Apache Kafka](https://github.com/apache/kafka) 2.6.0 with comments in Chinese and test cases for personal reference only.
+
+
+
 See our [web site](https://kafka.apache.org) for details on the project.
 
 You need to have [Java](http://www.oracle.com/technetwork/java/javase/downloads/index.html) installed.
@@ -32,7 +36,7 @@ Follow instructions in https://kafka.apache.org/documentation.html#quickstart
     ./gradlew test # runs both unit and integration tests
     ./gradlew unitTest
     ./gradlew integrationTest
-    
+
 ### Force re-running tests without code change ###
     ./gradlew cleanTest test
     ./gradlew cleanTest unitTest
@@ -54,7 +58,7 @@ Change the log4j setting in either `clients/src/test/resources/log4j.properties`
 By default, each failed test is retried once up to a maximum of five retries per test run. Tests are retried at the end of the test task. Adjust these parameters in the following way:
 
     ./gradlew test -PmaxTestRetries=1 -PmaxTestRetryFailures=5
-    
+
 See [Test Retry Gradle Plugin](https://github.com/gradle/test-retry-gradle-plugin) for more details.
 
 ### Generating test coverage reports ###
@@ -65,7 +69,7 @@ Generate coverage reports for the whole project:
 Generate coverage for a single module, i.e.: 
 
     ./gradlew clients:reportCoverage
-    
+
 ### Building a binary release gzipped tar ball ###
     ./gradlew clean releaseTarGz
 
@@ -78,7 +82,7 @@ The release file can be found inside `./core/build/distributions/`.
 ### Building auto generated messages ###
 Sometimes it is only necessary to rebuild the RPC auto-generated message data when switching between branches, as they could
 fail due to code changes. You can just run:
- 
+
     ./gradlew processMessages processTestMessages
 
 ### Cleaning the build ###
@@ -216,7 +220,7 @@ The gradle [dependency debugging documentation](https://docs.gradle.org/current/
 Alternatively, use the `allDeps` or `allDepInsight` tasks for recursively iterating through all subprojects:
 
     ./gradlew allDeps
-
+    
     ./gradlew allDepInsight --configuration runtime --dependency com.fasterxml.jackson.core:jackson-databind
 
 These take the same arguments as the builtin variants.
