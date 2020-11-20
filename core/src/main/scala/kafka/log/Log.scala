@@ -2424,21 +2424,22 @@ class Log(@volatile private var _dir: File,
 
 /**
  * Helper functions for logs
+ * Kafka 日志对象由多个日志段对象组成，每个日志段对象会在磁盘上创建一组文件。
  */
 object Log {
 
-  /** a log file */
+  /** a log file 消息日志文件 */
   val LogFileSuffix = ".log"
 
-  /** an index file */
+  /** an index file 位移索引文件 */
   val IndexFileSuffix = ".index"
 
-  /** a time index file */
+  /** a time index file 时间戳索引文件 */
   val TimeIndexFileSuffix = ".timeindex"
 
   val ProducerSnapshotFileSuffix = ".snapshot"
 
-  /** an (aborted) txn index */
+  /** an (aborted) txn index 已中止事务索引文件 */
   val TxnIndexFileSuffix = ".txnindex"
 
   /** a file that is scheduled to be deleted */

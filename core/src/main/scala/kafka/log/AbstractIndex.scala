@@ -303,6 +303,9 @@ abstract class AbstractIndex(@volatile private var _file: File, val baseOffset: 
 
   /**
    * Check if a particular offset is valid to be appended to this index.
+   *
+   * 检查偏移量是否有效、可附加到该索引。
+   *
    * @param offset The offset to check
    * @return true if this offset is valid to be appended to this index; false otherwise
    */
