@@ -48,6 +48,9 @@ import scala.jdk.CollectionConverters._
 import scala.collection.mutable.{ArrayBuffer, ListBuffer}
 import scala.collection.{Seq, Set, mutable}
 
+/**
+ * LogAppendInfo 伴生类的的工厂方法类，定义了用于创建特定的 LogAppendInfo 实例的工厂方法。
+ */
 object LogAppendInfo {
   val UnknownLogAppendInfo = LogAppendInfo(None, -1, RecordBatch.NO_TIMESTAMP, -1L, RecordBatch.NO_TIMESTAMP, -1L,
     RecordConversionStats.EMPTY, NoCompressionCodec, NoCompressionCodec, -1, -1, offsetsMonotonic = false, -1L)
@@ -70,6 +73,8 @@ object LogAppendInfo {
 
 /**
  * Struct to hold various quantities we compute about each message set before appending to the log
+ *
+ * 保存了一组待写入消息的各种元数据信息（比如第一条消息的位移、最后一条消息的位移、最大消息时间戳等）。
  *
  * @param firstOffset The first offset in the message set unless the message format is less than V2 and we are appending
  *                    to the follower.
@@ -125,6 +130,9 @@ case class LogAppendInfo(var firstOffset: Option[Long],
  * Container class which represents a snapshot of the significant offsets for a partition. This allows fetching
  * of these offsets atomically without the possibility of a leader change affecting their consistency relative
  * to each other. See [[Log.fetchOffsetSnapshot()]].
+ *
+ * 封装分区所有位移元数据的容器类。
+ *
  */
 case class LogOffsetSnapshot(logStartOffset: Long,
                              logEndOffset: LogOffsetMetadata,
@@ -133,6 +141,8 @@ case class LogOffsetSnapshot(logStartOffset: Long,
 
 /**
  * Another container which is used for lower level reads using  [[kafka.cluster.Partition.readRecords()]].
+ *
+ * 封装读取日志返回的数据及其元数据。
  */
 case class LogReadInfo(fetchedData: FetchDataInfo,
                        highWatermark: Long,
@@ -143,6 +153,8 @@ case class LogReadInfo(fetchedData: FetchDataInfo,
 /**
  * A class used to hold useful metadata about a completed transaction. This is used to build
  * the transaction index after appending to the log.
+ *
+ * 记录已完成事务的元数据，主要用于构建事务索引。
  *
  * @param producerId The ID of the producer
  * @param firstOffset The first offset (inclusive) of the transaction
@@ -162,6 +174,8 @@ case class CompletedTxn(producerId: Long, firstOffset: Long, lastOffset: Long, i
 
 /**
  * A class used to hold params required to decide to rotate a log segment or not.
+ *
+ * 定义用于控制日志段是否切分（Roll）的数据结构。
  */
 case class RollParams(maxSegmentMs: Long,
                       maxSegmentBytes: Int,
@@ -199,9 +213,13 @@ case object SegmentDeletion extends LogStartOffsetIncrementReason {
  * New log segments are created according to a configurable policy that controls the size in bytes or time interval
  * for a given segment.
  *
- * @param _dir The directory in which log segments are created.
+ * 日志是日志段的容器，其中定义了很多管理日志段的操作。
+ *
+ *
+ *
+ * @param _dir The directory in which log segments are created.                             日志所在的文件夹路径（主题分区的路径）。
  * @param config The log configuration settings
- * @param logStartOffset The earliest offset allowed to be exposed to kafka client.
+ * @param logStartOffset The earliest offset allowed to be exposed to kafka client.         日志的当前最早位移。
  *                       The logStartOffset can be updated by :
  *                       - user's DeleteRecordsRequest
  *                       - broker's log retention
@@ -233,6 +251,14 @@ class Log(@volatile private var _dir: File,
           val producerStateManager: ProducerStateManager,
           logDirFailureChannel: LogDirFailureChannel) extends Logging with KafkaMetricsGroup {
 
+  //
+  // [       已提交消息       ][       未提交消息       ][  ]
+  //          ↑                ↑                        ↑
+  //         LSO               HW                      LEO
+  // LSO（误）：日志起始位移：
+  // HW：高水位：即已提交消息和未提交消息的分界处，帮助 Kafka 完成副本同步。
+  // LEO：日志末端位移
+
   import kafka.log.Log._
 
   this.logIdent = s"[Log partition=$topicPartition, dir=${dir.getParent}] "
@@ -250,6 +276,7 @@ class Log(@volatile private var _dir: File,
   /* last time it was flushed */
   private val lastFlushedTime = new AtomicLong(time.milliseconds)
 
+  /* 封装了下一条待插入消息的位移值，等同于 LEO */
   @volatile private var nextOffsetMetadata: LogOffsetMetadata = _
 
   /* The earliest offset which is part of an incomplete transaction. This is used to compute the
@@ -2424,6 +2451,9 @@ class Log(@volatile private var _dir: File,
 
 /**
  * Helper functions for logs
+ *
+ * Log 定义了伴生类的工厂方法、常量和其他辅助方法。
+ *
  * Kafka 日志对象由多个日志段对象组成，每个日志段对象会在磁盘上创建一组文件。
  */
 object Log {
@@ -2437,12 +2467,14 @@ object Log {
   /** a time index file 时间戳索引文件 */
   val TimeIndexFileSuffix = ".timeindex"
 
+  /** 幂等型或事务型 Producer 的快照文件 */
   val ProducerSnapshotFileSuffix = ".snapshot"
 
   /** an (aborted) txn index 已中止事务索引文件 */
   val TxnIndexFileSuffix = ".txnindex"
 
-  /** a file that is scheduled to be deleted */
+  /** a file that is scheduled to be deleted 删除日志段操作创建的文件 */
+  /** 删除日志段文件是异步操作，Broker 端把日志段文件从 .log 后缀修改为.deleted 后缀。 */
   val DeletedFileSuffix = ".deleted"
 
   /** A temporary file that is being used for log cleaning */
@@ -2459,10 +2491,10 @@ object Log {
    */
   val CleanShutdownFile = ".kafka_cleanshutdown"
 
-  /** a directory that is scheduled to be deleted */
+  /** a directory that is scheduled to be deleted 删除主题时，主题的分区文件夹会被加上的后缀 */
   val DeleteDirSuffix = "-delete"
 
-  /** a directory that is used for future partition */
+  /** a directory that is used for future partition 用于变更主题分区文件夹地址 */
   val FutureDirSuffix = "-future"
 
   private[log] val DeleteDirPattern = Pattern.compile(s"^(\\S+)-(\\S+)\\.(\\S+)$DeleteDirSuffix")
@@ -2489,6 +2521,9 @@ object Log {
   /**
    * Make log segment file name from offset bytes. All this does is pad out the offset number with zeros
    * so that ls sorts the files numerically.
+   *
+   * 通过给定的位移值计算出对应的日志段文件名。
+   * Kafka 日志文件固定是 20 位的长度，本方法以用前面补 0 的方式把给定位移值扩充成一个固定 20 位长度的字符串。
    *
    * @param offset The offset to use in the file name
    * @return The filename
@@ -2651,6 +2686,9 @@ object Log {
 
 }
 
+/**
+ * 定义了 Log 对象的监控指标。
+ */
 object LogMetricNames {
   val NumLogSegments: String = "NumLogSegments"
   val LogStartOffset: String = "LogStartOffset"

@@ -49,6 +49,8 @@ import scala.math._
  * 每个日志段都有一个起始位移值，而该位移值是此日志段所有消息中最小的位移值（大于此前的所有日志段）。
  * 一个包含起始位置的日志段存储在两个文件，即 xxx.index 和 xxx.log。
  *
+ * 日志有多个日志段组成，每个日志段包含多种文件（.log, .index, .timeindex, .txnindex...）
+ *
  * @param log The file records containing log entries                                                 消息日志文件
  * @param lazyOffsetIndex The offset index                                                            位移索引文件
  * @param lazyTimeIndex The timestamp index                                                           时间戳索引文件
@@ -100,6 +102,7 @@ class LogSegment private[log] (val log: FileRecords,
   private var created = time.milliseconds
 
   /* the number of bytes since we last added an entry in the offset index */
+  /* 已经写入的字节数 */
   private var bytesSinceLastIndexEntry = 0
 
   // The timestamp we used for time based log rolling and for ensuring max compaction delay
@@ -142,7 +145,7 @@ class LogSegment private[log] (val log: FileRecords,
    * It is assumed this method is being called from within a lock.
    *
    * 把给定的消息添加到给定的位移后，如有需要则添加一个条目到索引中。
-   * 假定本方法在锁中被调用。
+   * 本方法非线程安全，需要在锁中被调用。
    *
    * 写入消息到日志段。
    * 基本流程如下：
